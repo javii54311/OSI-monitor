@@ -1,0 +1,24 @@
+# Archivos de compilación y ejecutables
+/build/
+*.o
+*.a
+*.so
+*.d
+metrics
+
+# Directorios de dependencias (los submódulos se gestionan por separado)
+/external/
+
+# Archivos de IDE/Editor
+.vscode/
+.idea/
+
+# Archivos de caché y logs de herramientas
+.cache/
+.scannerwork/
+*.log
+clang-format_errors.txt
+dox_errors.txt
+
+# Variables de entorno
+.env
