@@ -20,4 +20,5 @@ target_link_libraries(monitor PRIVATE
     promhttp
     Threads::Threads
     microhttpd
+    cjson
 )
