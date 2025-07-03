@@ -1,21 +1,57 @@
-// src/main.c (del proyecto OSI-monitor)
+// external/monitor/src/main.c
 
 #include "config.h"
 #include "constants.h"
 #include "metric_exposer.h"
-#include <signal.h> // For signal handling
+#include <fcntl.h> // For open()
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>   // For strlen()
+#include <sys/stat.h> // For S_IRUSR, etc.
 #include <unistd.h>
 
-// Global config and a flag to signal a reload
+#define PID_FILE "/tmp/refuge_monitor.pid"
+
 static monitor_config_t config;
-static volatile bool reload_config_flag = true; // Start with an initial load
-static const char* config_path = "config.json"; // Default config path
+static volatile bool reload_config_flag = true;
+static const char* config_path = "config.json";
 
 /**
- * @brief Signal handler for SIGHUP (reload) and SIGTERM (terminate).
+ * @brief Creates a PID file to store the process ID of the monitor.
+ * This allows other processes to find and signal the monitor.
+ */
+static void create_pid_file()
+{
+    int fd = open(PID_FILE, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (fd == -1)
+    {
+        perror("monitor: could not create pid file");
+        exit(EXIT_FAILURE); // Critical error
+    }
+    char pid_str[16];
+    snprintf(pid_str, sizeof(pid_str), "%d", getpid());
+    if (write(fd, pid_str, strlen(pid_str)) == -1)
+    {
+        perror("monitor: could not write to pid file");
+        close(fd);
+        exit(EXIT_FAILURE); // Critical error
+    }
+    close(fd);
+}
+
+/**
+ * @brief Removes the PID file upon clean shutdown.
+ */
+static void remove_pid_file()
+{
+    remove(PID_FILE);
+}
+
+/**
+ * @brief Signal handler for the monitor process.
+ * Handles graceful shutdown (SIGTERM, SIGINT) and config reload (SIGHUP).
  *
  * @param signum The signal number received.
  */
@@ -23,46 +59,33 @@ void signal_handler_monitor(int signum)
 {
     if (signum == SIGHUP)
     {
-        // Set flag to reload config in the main loop
         reload_config_flag = true;
     }
     else if (signum == SIGTERM || signum == SIGINT)
     {
-        // Perform cleanup and exit gracefully
         printf("\nMonitor shutting down...\n");
+        remove_pid_file(); // Clean up the PID file on exit
         destroy_mutex();
-        // The server daemon might not be cleaned up, but for this project's scope,
-        // exiting the process is sufficient.
         exit(EXIT_SUCCESS);
     }
 }
 
 /**
  * @brief Main entry point for the system monitor.
- *
- * Initializes metrics, starts the HTTP server, and enters a loop to
- * collect and update metrics based on a configuration file. The configuration
- * can be reloaded by sending a SIGHUP signal.
- *
- * @param argc Number of command-line arguments.
- * @param argv Array of command-line arguments. Expects an optional path to config file.
- * @return Returns EXIT_SUCCESS on normal termination, or EXIT_FAILURE on error.
  */
 int main(int argc, char* argv[])
 {
-    // If a config file path is provided as an argument, use it.
     if (argc > 1)
     {
         config_path = argv[1];
     }
     printf("Monitor using configuration file: %s\n", config_path);
 
-
-    // Setup signal handlers for graceful shutdown and config reload.
+    // Setup signal handlers
     struct sigaction sa;
     sa.sa_handler = signal_handler_monitor;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART; // Restart syscalls if possible
+    sa.sa_flags = SA_RESTART;
     sigaction(SIGHUP, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
@@ -81,19 +104,21 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
+    // Give the server thread a moment to start and potentially fail if port is in use.
+    usleep(100000); // 100ms
+
+    // If we are still running, it means the port was free. Create the PID file.
+    create_pid_file();
+    atexit(remove_pid_file); // Register cleanup function for other exit paths.
+
     while (true)
     {
         if (reload_config_flag)
         {
             printf("Monitor: Reloading configuration...\n");
-            if (load_config(&config, config_path) == 0)
-            {
-                printf("Monitor: Config loaded successfully. Update interval: %ds\n", config.update_interval_seconds);
-            }
-            else
+            if (load_config(&config, config_path) != 0)
             {
                 fprintf(stderr, "Monitor: Failed to load config, using default values.\n");
-                // Set safe defaults on failure
                 config.update_interval_seconds = 2;
                 config.enable_cpu = true;
                 config.enable_memory = true;
@@ -102,23 +127,14 @@ int main(int argc, char* argv[])
             reload_config_flag = false;
         }
 
-        // Update gauges based on the loaded configuration
-        if (config.enable_cpu)
-            update_cpu_gauge();
-        if (config.enable_memory)
-            update_memory_gauge();
-        if (config.enable_disk_io)
-            update_disk_io_gauges();
-        
-        // You can add the other metrics here, guarded by their config flags
-        // update_context_switches_gauge();
-        // update_network_gauges();
-        // update_process_count_gauge();
+        if (config.enable_cpu) update_cpu_gauge();
+        if (config.enable_memory) update_memory_gauge();
+        if (config.enable_disk_io) update_disk_io_gauges();
 
         sleep(config.update_interval_seconds > 0 ? config.update_interval_seconds : 1);
     }
 
-    // This part is technically unreachable, but good practice
+    // Unreachable code, but good practice
     pthread_join(server_thread_id, NULL);
     destroy_mutex();
 
