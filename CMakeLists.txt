@@ -14,10 +14,6 @@ include_directories(include)
 # ====================================================================
 # This monitor depends on the prometheus-client-c submodule. To find it
 # correctly, we use ${CMAKE_SOURCE_DIR} which points to the top-level project root.
-#
-# When adding an out-of-tree source, we must also specify a binary directory
-# where CMake can place the build artifacts for that dependency.
-
 set(TEST OFF CACHE BOOL "Disable tests for prometheus-client-c")
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/prometheus-client-c/prom ${CMAKE_BINARY_DIR}/prom-build)
 
@@ -42,6 +38,11 @@ add_executable(monitor
     src/metrics.c
     src/config.c
 )
+
+# Explicitly tell the 'monitor' target where to find the cJSON headers.
+# We use ${CMAKE_SOURCE_DIR} to get the path from the top-level project root,
+# which makes this path valid no matter where this CMakeLists.txt is included from.
+target_include_directories(monitor PRIVATE ${CMAKE_SOURCE_DIR}/external)
 
 # The monitor executable links against its direct dependencies.
 target_link_libraries(monitor PRIVATE prom promhttp cjson)
