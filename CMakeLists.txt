@@ -12,26 +12,23 @@ include_directories(include)
 # ====================================================================
 # Dependencies
 # ====================================================================
-# This monitor depends on the prometheus-client-c submodule, which is
-# located as a sibling directory in the main project's 'external' folder.
-# We use an absolute path from the top-level project source directory
-# (${PROJECT_SOURCE_DIR}) to ensure it can be found correctly when this
-# CMakeLists.txt is included by the parent project.
+# This monitor depends on the prometheus-client-c submodule.
+# To find it correctly when included by a parent project, we use
+# ${CMAKE_SOURCE_DIR}, which always points to the top-level project root.
 
 set(TEST OFF CACHE BOOL "Disable tests for prometheus-client-c")
-add_subdirectory(${PROJECT_SOURCE_DIR}/external/prometheus-client-c/prom)
+add_subdirectory(${CMAKE_SOURCE_DIR}/external/prometheus-client-c/prom)
 
 # Patch the promhttp source file to ensure handler signature compatibility.
-# The working directory is set to an absolute path to reliably locate the file.
 execute_process(
     COMMAND sed -i "s/int promhttp_handler/enum MHD_Result promhttp_handler/" src/promhttp.c
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/external/prometheus-client-c/promhttp
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/external/prometheus-client-c/promhttp
     RESULT_VARIABLE sed_result
 )
 if(sed_result)
     message(FATAL_ERROR "Failed to patch promhttp.c: ${sed_result}")
 endif()
-add_subdirectory(${PROJECT_SOURCE_DIR}/external/prometheus-client-c/promhttp)
+add_subdirectory(${CMAKE_SOURCE_DIR}/external/prometheus-client-c/promhttp)
 
 
 # ====================================================================
@@ -45,7 +42,6 @@ add_executable(monitor
 )
 
 # The monitor executable links against its direct dependencies.
-# The cJSON dependency is expected to be handled by the parent project.
 target_link_libraries(monitor PRIVATE prom promhttp cjson)
 
 # Link against the real-time library, which is necessary on some systems.
