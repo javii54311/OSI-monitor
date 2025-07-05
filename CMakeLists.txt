@@ -12,12 +12,14 @@ include_directories(include)
 # ====================================================================
 # Dependencies
 # ====================================================================
-# This monitor depends on the prometheus-client-c submodule.
-# To find it correctly when included by a parent project, we use
-# ${CMAKE_SOURCE_DIR}, which always points to the top-level project root.
+# This monitor depends on the prometheus-client-c submodule. To find it
+# correctly, we use ${CMAKE_SOURCE_DIR} which points to the top-level project root.
+#
+# When adding an out-of-tree source, we must also specify a binary directory
+# where CMake can place the build artifacts for that dependency.
 
 set(TEST OFF CACHE BOOL "Disable tests for prometheus-client-c")
-add_subdirectory(${CMAKE_SOURCE_DIR}/external/prometheus-client-c/prom)
+add_subdirectory(${CMAKE_SOURCE_DIR}/external/prometheus-client-c/prom ${CMAKE_BINARY_DIR}/prom-build)
 
 # Patch the promhttp source file to ensure handler signature compatibility.
 execute_process(
@@ -28,7 +30,7 @@ execute_process(
 if(sed_result)
     message(FATAL_ERROR "Failed to patch promhttp.c: ${sed_result}")
 endif()
-add_subdirectory(${CMAKE_SOURCE_DIR}/external/prometheus-client-c/promhttp)
+add_subdirectory(${CMAKE_SOURCE_DIR}/external/prometheus-client-c/promhttp ${CMAKE_BINARY_DIR}/promhttp-build)
 
 
 # ====================================================================
