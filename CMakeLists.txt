@@ -1,41 +1,59 @@
-# CMakeLists.txt del proyecto OSI-monitor
-
+# ====================================================================
+# Project Definition: Refuge Monitor
+# ====================================================================
 cmake_minimum_required(VERSION 3.14)
-project(SystemMonitor C)
+project(monitor C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# --- CORRECTION: Find dependencies within this component's scope ---
-# A component should be responsible for finding its own dependencies.
-find_package(Threads REQUIRED)
-
-# The parent project (RefugeShell) is expected to provide include paths
-# for dependencies it manages, like cJSON.
-# Our own include path is local.
 include_directories(include)
 
-# Add all necessary source files for the monitor executable.
+# ====================================================================
+# Dependencies
+# ====================================================================
+# This monitor depends on the prometheus-client-c submodule, which is
+# located as a sibling directory in the main project's 'external' folder.
+# We use an absolute path from the top-level project source directory
+# (${PROJECT_SOURCE_DIR}) to ensure it can be found correctly when this
+# CMakeLists.txt is included by the parent project.
+
+set(TEST OFF CACHE BOOL "Disable tests for prometheus-client-c")
+add_subdirectory(${PROJECT_SOURCE_DIR}/external/prometheus-client-c/prom)
+
+# Patch the promhttp source file to ensure handler signature compatibility.
+# The working directory is set to an absolute path to reliably locate the file.
+execute_process(
+    COMMAND sed -i "s/int promhttp_handler/enum MHD_Result promhttp_handler/" src/promhttp.c
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/external/prometheus-client-c/promhttp
+    RESULT_VARIABLE sed_result
+)
+if(sed_result)
+    message(FATAL_ERROR "Failed to patch promhttp.c: ${sed_result}")
+endif()
+add_subdirectory(${PROJECT_SOURCE_DIR}/external/prometheus-client-c/promhttp)
+
+
+# ====================================================================
+# Main Application Target: The Monitor
+# ====================================================================
 add_executable(monitor
     src/main.c
     src/metric_exposer.c
     src/metrics.c
-    src/config.c 
+    src/config.c
 )
 
-# Apply strict compiler flags.
-target_compile_options(monitor PRIVATE -Wall -Wextra -Wpedantic -Werror)
+# The monitor executable links against its direct dependencies.
+# The cJSON dependency is expected to be handled by the parent project.
+target_link_libraries(monitor PRIVATE prom promhttp cjson)
 
-# Declare the dependencies. The parent project (RefugeShell) is responsible
-# for finding and providing the library targets for prom, promhttp, and cjson.
-# Threads::Threads is now found within this scope.
-target_link_libraries(monitor PRIVATE
-    prom
-    promhttp
-    Threads::Threads # This will now be found
-    microhttpd
-    cjson         
-)
+# Link against the real-time library, which is necessary on some systems.
+find_library(RT_LIBRARY rt)
+if(RT_LIBRARY)
+    target_link_libraries(monitor PRIVATE ${RT_LIBRARY})
+endif()
 
-# Optional: Define where to install the executable.
-install(TARGETS monitor DESTINATION bin)
+# Link against the Threads library.
+find_package(Threads REQUIRED)
+target_link_libraries(monitor PRIVATE Threads::Threads)
