@@ -28,14 +28,22 @@ static prom_gauge_t* process_count_gauge;
 /** Prometheus gauge for the total number of context switches */
 static prom_gauge_t* context_switches_gauge;
 
+void lock_metrics_mutex(void)
+{
+    pthread_mutex_lock(&metrics_mutex);
+}
+
+void unlock_metrics_mutex(void)
+{
+    pthread_mutex_unlock(&metrics_mutex);
+}
+
 void update_cpu_gauge(void)
 {
     double usage = get_cpu_usage();
     if (usage >= 0.0)
     {
-        pthread_mutex_lock(&metrics_mutex);
         prom_gauge_set(cpu_usage_gauge, usage, NULL);
-        pthread_mutex_unlock(&metrics_mutex);
     }
     else
     {
@@ -48,9 +56,7 @@ void update_memory_gauge(void)
     double usage = get_memory_usage();
     if (usage >= 0.0)
     {
-        pthread_mutex_lock(&metrics_mutex);
         prom_gauge_set(memory_usage_gauge, usage, NULL);
-        pthread_mutex_unlock(&metrics_mutex);
     }
     else
     {
@@ -63,9 +69,7 @@ void update_context_switches_gauge(void)
     unsigned long long ctxt = get_context_switches();
     if (ctxt != METRICS_ERROR_ULL)
     {
-        pthread_mutex_lock(&metrics_mutex);
         prom_gauge_set(context_switches_gauge, (double)ctxt, NULL);
-        pthread_mutex_unlock(&metrics_mutex);
     }
     else
     {
@@ -77,11 +81,8 @@ void update_disk_io_gauges(void)
 {
     unsigned long long reads = 0, writes = 0;
     get_disk_io(&reads, &writes);
-
-    pthread_mutex_lock(&metrics_mutex);
     prom_gauge_set(disk_reads_gauge, (double)reads, NULL);
     prom_gauge_set(disk_writes_gauge, (double)writes, NULL);
-    pthread_mutex_unlock(&metrics_mutex);
 }
 
 void update_network_gauges(void)
@@ -89,13 +90,11 @@ void update_network_gauges(void)
     unsigned long long rx_bytes = 0, tx_bytes = 0, rx_errors = 0, tx_errors = 0, collisions = 0;
     get_network_stats(&rx_bytes, &tx_bytes, &rx_errors, &tx_errors, &collisions);
 
-    pthread_mutex_lock(&metrics_mutex);
     prom_gauge_set(network_rx_bytes_gauge, (double)rx_bytes, NULL);
     prom_gauge_set(network_tx_bytes_gauge, (double)tx_bytes, NULL);
     prom_gauge_set(network_rx_errors_gauge, (double)rx_errors, NULL);
     prom_gauge_set(network_tx_errors_gauge, (double)tx_errors, NULL);
     prom_gauge_set(network_collisions_gauge, (double)collisions, NULL);
-    pthread_mutex_unlock(&metrics_mutex);
 }
 
 void update_process_count_gauge(void)
@@ -103,9 +102,7 @@ void update_process_count_gauge(void)
     int process_count = get_running_processes();
     if (process_count != METRICS_ERROR_INT)
     {
-        pthread_mutex_lock(&metrics_mutex);
         prom_gauge_set(process_count_gauge, (double)process_count, NULL);
-        pthread_mutex_unlock(&metrics_mutex);
     }
     else
     {
@@ -132,7 +129,7 @@ void* expose_metrics_thread(void* arg)
     // The main thread will handle metric updates.
     while (true)
     {
-        sleep(UPDATE_INTERVAL_SECONDS);
+        sleep(1); // Keep the thread alive, the main thread dictates the update interval
     }
 
     // This part is unreachable in the current design
@@ -154,7 +151,6 @@ int initialize_metrics(void)
         return EXIT_FAILURE;
     }
 
-    // Create all gauge metrics
     cpu_usage_gauge = prom_gauge_new("cpu_usage_percentage", "Current CPU usage percentage.", NO_LABELS, NULL);
     memory_usage_gauge = prom_gauge_new("memory_usage_percentage", "Current memory usage percentage.", NO_LABELS, NULL);
     disk_reads_gauge = prom_gauge_new("disk_io_reads_total", "Total number of sectors read.", NO_LABELS, NULL);
@@ -173,7 +169,6 @@ int initialize_metrics(void)
     context_switches_gauge =
         prom_gauge_new("context_switches_total", "Total number of context switches.", NO_LABELS, NULL);
 
-    // Register all metrics
     prom_collector_registry_must_register_metric(cpu_usage_gauge);
     prom_collector_registry_must_register_metric(memory_usage_gauge);
     prom_collector_registry_must_register_metric(disk_reads_gauge);
