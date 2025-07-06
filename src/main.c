@@ -1,15 +1,13 @@
-// external/monitor/src/main.c
-
 #include "config.h"
 #include "constants.h"
 #include "metric_exposer.h"
-#include <fcntl.h> // For open()
+#include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>   // For strlen()
-#include <sys/stat.h> // For S_IRUSR, etc.
+#include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define PID_FILE "/tmp/refuge_monitor.pid"
@@ -22,13 +20,13 @@ static const char* config_path = "config.json";
  * @brief Creates a PID file to store the process ID of the monitor.
  * This allows other processes to find and signal the monitor.
  */
-static void create_pid_file()
+static void create_pid_file(void)
 {
     int fd = open(PID_FILE, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     if (fd == -1)
     {
         perror("monitor: could not create pid file");
-        exit(EXIT_FAILURE); // Critical error
+        exit(EXIT_FAILURE);
     }
     char pid_str[16];
     snprintf(pid_str, sizeof(pid_str), "%d", getpid());
@@ -36,7 +34,7 @@ static void create_pid_file()
     {
         perror("monitor: could not write to pid file");
         close(fd);
-        exit(EXIT_FAILURE); // Critical error
+        exit(EXIT_FAILURE);
     }
     close(fd);
 }
@@ -44,7 +42,7 @@ static void create_pid_file()
 /**
  * @brief Removes the PID file upon clean shutdown.
  */
-static void remove_pid_file()
+static void remove_pid_file(void)
 {
     remove(PID_FILE);
 }
@@ -55,7 +53,7 @@ static void remove_pid_file()
  *
  * @param signum The signal number received.
  */
-void signal_handler_monitor(int signum)
+static void signal_handler_monitor(int signum)
 {
     if (signum == SIGHUP)
     {
@@ -64,7 +62,7 @@ void signal_handler_monitor(int signum)
     else if (signum == SIGTERM || signum == SIGINT)
     {
         printf("\nMonitor shutting down...\n");
-        remove_pid_file(); // Clean up the PID file on exit
+        remove_pid_file();
         destroy_mutex();
         exit(EXIT_SUCCESS);
     }
@@ -81,7 +79,6 @@ int main(int argc, char* argv[])
     }
     printf("Monitor using configuration file: %s\n", config_path);
 
-    // Setup signal handlers
     struct sigaction sa;
     sa.sa_handler = signal_handler_monitor;
     sigemptyset(&sa.sa_mask);
@@ -104,12 +101,10 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    // Give the server thread a moment to start and potentially fail if port is in use.
-    usleep(100000); // 100ms
+    usleep(100000); // 100ms pause for the server thread to start.
 
-    // If we are still running, it means the port was free. Create the PID file.
     create_pid_file();
-    atexit(remove_pid_file); // Register cleanup function for other exit paths.
+    atexit(remove_pid_file);
 
     while (true)
     {
@@ -127,14 +122,30 @@ int main(int argc, char* argv[])
             reload_config_flag = false;
         }
 
-        if (config.enable_cpu) update_cpu_gauge();
-        if (config.enable_memory) update_memory_gauge();
-        if (config.enable_disk_io) update_disk_io_gauges();
+        // Lock the mutex to ensure the entire update block is atomic.
+        // This prevents Prometheus from scraping partially updated metrics.
+        lock_metrics_mutex();
+
+        if (config.enable_cpu)
+            update_cpu_gauge();
+        if (config.enable_memory)
+            update_memory_gauge();
+        if (config.enable_disk_io)
+            update_disk_io_gauges();
+        
+        // Note: Other metrics are collected but not currently controlled by the config file.
+        // They could be added to the config logic if needed.
+        update_context_switches_gauge();
+        update_network_gauges();
+        update_process_count_gauge();
+
+        // Unlock the mutex after all metrics have been updated.
+        unlock_metrics_mutex();
 
         sleep(config.update_interval_seconds > 0 ? config.update_interval_seconds : 1);
     }
 
-    // Unreachable code, but good practice
+    // This section is unreachable in the current design, but it's good practice.
     pthread_join(server_thread_id, NULL);
     destroy_mutex();
 
