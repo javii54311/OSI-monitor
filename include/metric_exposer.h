@@ -52,6 +52,12 @@ void update_network_gauges(void);
 void update_process_count_gauge(void);
 
 /**
+ * @brief Updates the custom heap fragmentation gauge.
+ * @note This function is not thread-safe by itself; call within a mutex lock.
+ */
+void update_fragmentation_gauge(void); // <--- NUEVO PROTOTIPO AÑADIDO
+
+/**
  * @brief Thread function to expose metrics via an HTTP server.
  *
  * This function starts an HTTP daemon to serve the collected Prometheus metrics.

@@ -122,8 +122,6 @@ int main(int argc, char* argv[])
             reload_config_flag = false;
         }
 
-        // Lock the mutex to ensure the entire update block is atomic.
-        // This prevents Prometheus from scraping partially updated metrics.
         lock_metrics_mutex();
 
         if (config.enable_cpu)
@@ -133,19 +131,16 @@ int main(int argc, char* argv[])
         if (config.enable_disk_io)
             update_disk_io_gauges();
         
-        // Note: Other metrics are collected but not currently controlled by the config file.
-        // They could be added to the config logic if needed.
         update_context_switches_gauge();
         update_network_gauges();
         update_process_count_gauge();
+        update_fragmentation_gauge(); // <--- LLAMADA A LA NUEVA FUNCIÓN AÑADIDA
 
-        // Unlock the mutex after all metrics have been updated.
         unlock_metrics_mutex();
 
         sleep(config.update_interval_seconds > 0 ? config.update_interval_seconds : 1);
     }
 
-    // This section is unreachable in the current design, but it's good practice.
     pthread_join(server_thread_id, NULL);
     destroy_mutex();
 

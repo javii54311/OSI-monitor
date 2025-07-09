@@ -1,6 +1,7 @@
 #include "metric_exposer.h"
 #include "constants.h"
 #include <stdbool.h>
+#include <memory_stats.h> // <--- NUEVO INCLUDE AÑADIDO
 
 /** Mutex for thread synchronization */
 static pthread_mutex_t metrics_mutex;
@@ -27,6 +28,10 @@ static prom_gauge_t* network_collisions_gauge;
 static prom_gauge_t* process_count_gauge;
 /** Prometheus gauge for the total number of context switches */
 static prom_gauge_t* context_switches_gauge;
+/** Prometheus gauge for custom heap fragmentation */
+static prom_gauge_t* custom_heap_fragmentation_gauge; // <--- NUEVO GAUGE DECLARADO
+
+// ... [El resto de las funciones lock, unlock, update_cpu, etc. se mantienen igual] ...
 
 void lock_metrics_mutex(void)
 {
@@ -110,6 +115,23 @@ void update_process_count_gauge(void)
     }
 }
 
+// --- NUEVA FUNCIÓN AÑADIDA ---
+void update_fragmentation_gauge(void)
+{
+    // Llama a la función de la librería de memoria para obtener la tasa de fragmentación
+    double frag_rate = get_fragmentation_rate();
+    if (frag_rate >= 0.0)
+    {
+        prom_gauge_set(custom_heap_fragmentation_gauge, frag_rate, NULL);
+    }
+    else
+    {
+        // Esto es normal si el heap aún no se ha usado
+        // fprintf(stderr, "Failed to get fragmentation rate\n");
+    }
+}
+
+// ... [La función expose_metrics_thread se mantiene igual] ...
 void* expose_metrics_thread(void* arg)
 {
     (void)arg; // Unused argument
@@ -125,17 +147,15 @@ void* expose_metrics_thread(void* arg)
 
     printf("Metrics server started on http://localhost:%d/metrics\n", METRICS_PORT);
 
-    // This thread's only job is to keep the server alive.
-    // The main thread will handle metric updates.
     while (true)
     {
-        sleep(1); // Keep the thread alive, the main thread dictates the update interval
+        sleep(1); 
     }
 
-    // This part is unreachable in the current design
     MHD_stop_daemon(daemon);
     return NULL;
 }
+
 
 int initialize_metrics(void)
 {
@@ -169,6 +189,9 @@ int initialize_metrics(void)
     context_switches_gauge =
         prom_gauge_new("context_switches_total", "Total number of context switches.", NO_LABELS, NULL);
 
+    // --- NUEVO GAUGE CREADO ---
+    custom_heap_fragmentation_gauge = prom_gauge_new("custom_heap_fragmentation_rate", "Fragmentation rate of the custom memory allocator's heap.", NO_LABELS, NULL);
+
     prom_collector_registry_must_register_metric(cpu_usage_gauge);
     prom_collector_registry_must_register_metric(memory_usage_gauge);
     prom_collector_registry_must_register_metric(disk_reads_gauge);
@@ -180,6 +203,9 @@ int initialize_metrics(void)
     prom_collector_registry_must_register_metric(network_collisions_gauge);
     prom_collector_registry_must_register_metric(process_count_gauge);
     prom_collector_registry_must_register_metric(context_switches_gauge);
+
+    // --- NUEVO GAUGE REGISTRADO ---
+    prom_collector_registry_must_register_metric(custom_heap_fragmentation_gauge);
 
     return EXIT_SUCCESS;
 }
